@@ -1,0 +1,58 @@
+<%+header%>
+<div class="cbi-map" id="pkt-frag-status">
+    <fieldset class="cbi-section">
+        <legend><%=translate("Kernel Module Status")%></legend>
+        <div class="cbi-value">
+            <label><%=translate("Module Loaded")%></label>
+            <div class="cbi-value-field" id="mod-loaded"><em>Checking...</em></div>
+        </div>
+        <div class="cbi-value">
+            <label><%=translate("Daemon Running")%></label>
+            <div class="cbi-value-field" id="daemon-running"><em>Checking...</em></div>
+        </div>
+    </fieldset>
+    
+    <fieldset class="cbi-section">
+        <legend><%=translate("Active Parameters")%></legend>
+        <div id="param-table" class="cbi-value-field"><em>Loading...</em></div>
+    </fieldset>
+    
+    <fieldset class="cbi-section">
+        <legend><%=translate("Statistics")%></legend>
+        <div id="stats-table" class="cbi-value-field"><em>Loading...</em></div>
+    </fieldset>
+</div>
+
+<script>
+function refreshStatus() {
+    fetch('<%=luci.dispatcher.build_url("admin/network/pkt-frag/status")%>')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('mod-loaded').innerHTML = 
+                data.module_loaded ? '<span style="color:green">✓ Loaded</span>' : '<span style="color:red">✗ Not Loaded</span>';
+            document.getElementById('daemon-running').innerHTML = 
+                data.running ? '<span style="color:green">✓ Running</span>' : '<span style="color:red">✗ Stopped</span>';
+            
+            let paramHtml = '<table class="cbi-value-table"><tr><th>Parameter</th><th>Value</th></tr>';
+            for (const [k, v] of Object.entries(data.params)) {
+                paramHtml += `<tr><td>${k}</td><td><code>${v}</code></td></tr>`;
+            }
+            paramHtml += '</table>';
+            document.getElementById('param-table').innerHTML = paramHtml;
+            
+            let statsHtml = '<table class="cbi-value-table"><tr><th>Stat</th><th>Value</th></tr>';
+            for (const [k, v] of Object.entries(data.stats)) {
+                statsHtml += `<tr><td>${k}</td><td><code>${v}</code></td></tr>`;
+            }
+            statsHtml += '</table>';
+            document.getElementById('stats-table').innerHTML = statsHtml;
+        })
+        .catch(e => console.error(e));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    refreshStatus();
+    setInterval(refreshStatus, 5000);
+});
+</script>
+<%+footer%>
