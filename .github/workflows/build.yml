@@ -1,0 +1,54 @@
+name: Build pkt-frag for Google Router (ARM64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [ "openwrt/pkt-frag/**" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download OpenWrt SDK (23.05, MediaTek Filogic)
+        run: |
+          wget -q https://downloads.openwrt.org/releases/23.05.0/targets/mediatek/filogic/openwrt-sdk-23.05.0-mediatek-filogic_gcc-13.2.0_musl.Linux-x86_64.tar.xz
+          tar -xf openwrt-sdk-*.tar.xz
+          echo "SDK_DIR=$(pwd)/openwrt-sdk-*" >> $GITHUB_ENV
+          
+      - name: Copy package to SDK
+        run: |
+          cp -r openwrt/pkt-frag ${{ env.SDK_DIR }}/package/
+          
+      - name: Update feeds
+        run: |
+          cd ${{ env.SDK_DIR }}
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          
+      - name: Configure packages
+        run: |
+          cd ${{ env.SDK_DIR }}
+          cat >> .config << 'EOF'
+          CONFIG_PACKAGE_kmod-pkt-frag=m
+          CONFIG_PACKAGE_pkt-frag-daemon=m
+          CONFIG_PACKAGE_luci-app-pkt-frag=m
+          EOF
+          make defconfig
+          
+      - name: Compile
+        run: |
+          cd ${{ env.SDK_DIR }}
+          make package/pkt-frag/compile V=s -j$(nproc)
+          make package/luci-app-pkt-frag/compile V=s -j$(nproc)
+          
+      - name: Upload IPK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-pkt-frag-ipks-arm64
+          path: |
+            ${{ env.SDK_DIR }}/bin/packages/aarch64_generic/base/kmod-pkt-frag*.ipk
+            ${{ env.SDK_DIR }}/bin/packages/aarch64_generic/base/pkt-frag-daemon*.ipk
+            ${{ env.SDK_DIR }}/bin/packages/aarch64_generic/luci/luci-app-pkt-frag*.ipk
