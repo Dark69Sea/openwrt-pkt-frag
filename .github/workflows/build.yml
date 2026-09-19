@@ -9,36 +9,59 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04  # explicit version
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install build dependencies
+      - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk flex bison \
-            libssl-dev wget unzip python3 rsync file ccache
+          sudo apt-get install -y build-essential libncurses5-dev gawk flex bison libssl-dev wget unzip python3 rsync file ccache curl
           
-      - name: Download OpenWrt SDK (23.05, MediaTek Filogic)
+      - name: Find and download OpenWrt SDK
+        id: sdk
         run: |
-          wget -q https://downloads.openwrt.org/releases/23.05.0/targets/mediatek/filogic/openwrt-sdk-23.05.0-mediatek-filogic_gcc-13.2.0_musl.Linux-x86_64.tar.xz
-          tar -xf openwrt-sdk-*.tar.xz
-          echo "SDK_DIR=$(pwd)/openwrt-sdk-*" >> $GITHUB_ENV
+          set -euo pipefail
+          BASE="https://downloads.openwrt.org/releases/23.05.0/targets/mediatek/filogic"
+          echo "Fetching SDK index from $BASE/"
+          
+          # Get the SDK filename from directory listing
+          FILE=$(curl -sL "$BASE/" | grep -oE 'openwrt-sdk-[^"]*mediatek-filogic[^"]*\.tar\.(xz|gz)' | head -1)
+          
+          if [ -z "$FILE" ]; then
+            echo "❌ No SDK file found. Directory listing:"
+            curl -sL "$BASE/" | grep -oE 'href="[^"]*"' | sed 's/href="//;s/"//'
+            exit 1
+          fi
+          
+          echo "✅ Found SDK: $FILE"
+          wget -q --show-progress "$BASE/$FILE"
+          tar -xf "$FILE"
+          
+          SDK_DIR=$(find . -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -1)
+          if [ -z "$SDK_DIR" ]; then
+            echo "❌ SDK directory not found after extraction"
+            ls -la
+            exit 1
+          fi
+          
+          echo "SDK_DIR=$SDK_DIR" >> $GITHUB_OUTPUT
+          echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
           
       - name: Copy package to SDK
         run: |
-          cp -r openwrt/pkt-frag ${{ env.SDK_DIR }}/package/
+          cp -r openwrt/pkt-frag ${{ steps.sdk.outputs.SDK_DIR }}/package/
           
       - name: Update feeds
         run: |
-          cd ${{ env.SDK_DIR }}
+          cd ${{ steps.sdk.outputs.SDK_DIR }}
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           
       - name: Configure packages
         run: |
-          cd ${{ env.SDK_DIR }}
+          cd ${{ steps.sdk.outputs.SDK_DIR }}
           cat >> .config << 'EOF'
           CONFIG_PACKAGE_kmod-pkt-frag=m
           CONFIG_PACKAGE_pkt-frag-daemon=m
@@ -50,23 +73,23 @@ jobs:
           
       - name: Compile kernel module
         run: |
-          cd ${{ env.SDK_DIR }}
-          make package/pkt-frag/compile V=s -j$(nproc) || (echo "=== BUILD FAILED ===" && find . -name "*.o" -o -name "*.ko" | head -20 && exit 1)
+          cd ${{ steps.sdk.outputs.SDK_DIR }}
+          make package/pkt-frag/compile V=s -j$(nproc)
           
       - name: Compile LuCI app
         run: |
-          cd ${{ env.SDK_DIR }}
-          make package/luci-app-pkt-frag/compile V=s -j$(nproc) || (echo "=== BUILD FAILED ===" && exit 1)
+          cd ${{ steps.sdk.outputs.SDK_DIR }}
+          make package/luci-app-pkt-frag/compile V=s -j$(nproc)
           
-      - name: List artifacts
+      - name: Verify artifacts
         run: |
-          find ${{ env.SDK_DIR }}/bin -name "*.ipk" -type f
+          find ${{ steps.sdk.outputs.SDK_DIR }}/bin -name "*.ipk" -type f | head -20
           
       - name: Upload IPK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-pkt-frag-ipks-arm64
           path: |
-            ${{ env.SDK_DIR }}/bin/packages/aarch64_generic/base/kmod-pkt-frag*.ipk
-            ${{ env.SDK_DIR }}/bin/packages/aarch64_generic/base/pkt-frag-daemon*.ipk
-            ${{ env.SDK_DIR }}/bin/packages/aarch64_generic/luci/luci-app-pkt-frag*.ipk
+            ${{ steps.sdk.outputs.SDK_DIR }}/bin/packages/aarch64_generic/base/kmod-pkt-frag*.ipk
+            ${{ steps.sdk.outputs.SDK_DIR }}/bin/packages/aarch64_generic/base/pkt-frag-daemon*.ipk
+            ${{ steps.sdk.outputs.SDK_DIR }}/bin/packages/aarch64_generic/luci/luci-app-pkt-frag*.ipk
