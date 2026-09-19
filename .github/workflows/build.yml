@@ -1,3 +1,4 @@
+# .github/workflows/build.yml
 name: Build pkt-frag for Google Router (ARM64)
 
 on:
@@ -8,10 +9,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # explicit version
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk flex bison \
+            libssl-dev wget unzip python3 rsync file ccache
+          
       - name: Download OpenWrt SDK (23.05, MediaTek Filogic)
         run: |
           wget -q https://downloads.openwrt.org/releases/23.05.0/targets/mediatek/filogic/openwrt-sdk-23.05.0-mediatek-filogic_gcc-13.2.0_musl.Linux-x86_64.tar.xz
@@ -35,14 +43,24 @@ jobs:
           CONFIG_PACKAGE_kmod-pkt-frag=m
           CONFIG_PACKAGE_pkt-frag-daemon=m
           CONFIG_PACKAGE_luci-app-pkt-frag=m
+          CONFIG_DEVEL=y
+          CONFIG_CCACHE=y
           EOF
           make defconfig
           
-      - name: Compile
+      - name: Compile kernel module
         run: |
           cd ${{ env.SDK_DIR }}
-          make package/pkt-frag/compile V=s -j$(nproc)
-          make package/luci-app-pkt-frag/compile V=s -j$(nproc)
+          make package/pkt-frag/compile V=s -j$(nproc) || (echo "=== BUILD FAILED ===" && find . -name "*.o" -o -name "*.ko" | head -20 && exit 1)
+          
+      - name: Compile LuCI app
+        run: |
+          cd ${{ env.SDK_DIR }}
+          make package/luci-app-pkt-frag/compile V=s -j$(nproc) || (echo "=== BUILD FAILED ===" && exit 1)
+          
+      - name: List artifacts
+        run: |
+          find ${{ env.SDK_DIR }}/bin -name "*.ipk" -type f
           
       - name: Upload IPK artifacts
         uses: actions/upload-artifact@v4
