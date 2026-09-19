@@ -11,6 +11,9 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       
@@ -26,7 +29,6 @@ jobs:
           BASE="https://downloads.openwrt.org/releases/23.05.0/targets/mediatek/filogic"
           echo "Fetching SDK index from $BASE/"
           
-          # Get the SDK filename from directory listing
           FILE=$(curl -sL "$BASE/" | grep -oE 'openwrt-sdk-[^"]*mediatek-filogic[^"]*\.tar\.(xz|gz)' | head -1)
           
           if [ -z "$FILE" ]; then
@@ -46,12 +48,19 @@ jobs:
             exit 1
           fi
           
+          # Convert to absolute path
+          SDK_DIR=$(realpath "$SDK_DIR")
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_OUTPUT
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
           
       - name: Copy package to SDK
         run: |
-          cp -r openwrt/pkt-frag ${{ steps.sdk.outputs.SDK_DIR }}/package/
+          # Use absolute path for source
+          SRC="${{ github.workspace }}/openwrt/pkt-frag"
+          DST="${{ steps.sdk.outputs.SDK_DIR }}/package/pkt-frag"
+          echo "Copying $SRC -> $DST"
+          ls -la "$SRC"
+          cp -r "$SRC" "$DST"
           
       - name: Update feeds
         run: |
