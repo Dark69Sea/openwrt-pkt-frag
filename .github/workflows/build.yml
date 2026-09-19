@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -54,10 +54,8 @@ jobs:
           
       - name: Prepare package directory
         run: |
-          # Create package directory and copy our package files
           PKG_DIR="${{ steps.sdk.outputs.SDK_DIR }}/package/pkt-frag"
           mkdir -p "$PKG_DIR"
-          # Copy all files from repo's openwrt/ to package/pkt-frag/
           cp -r ${{ github.workspace }}/openwrt/* "$PKG_DIR/"
           echo "Package directory contents:"
           ls -la "$PKG_DIR"
@@ -67,6 +65,14 @@ jobs:
           cd ${{ steps.sdk.outputs.SDK_DIR }}
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          
+      - name: Prepare kernel build directory (fix missing headers)
+        run: |
+          cd ${{ steps.sdk.outputs.SDK_DIR }}
+          # Prepare kernel headers and scripts
+          make target/linux/prepare V=s -j$(nproc) || true
+          # Also try to build kernel modules infrastructure
+          make target/linux/compile V=s -j$(nproc) || true
           
       - name: Configure packages
         run: |
@@ -83,6 +89,7 @@ jobs:
       - name: Compile kernel module
         run: |
           cd ${{ steps.sdk.outputs.SDK_DIR }}
+          # Use kernel build dir that was prepared
           make package/pkt-frag/compile V=s -j$(nproc)
           
       - name: Compile LuCI app
