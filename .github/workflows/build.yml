@@ -1,111 +1,36 @@
-# .github/workflows/build.yml
-name: Build pkt-frag for Google Router (ARM64)
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths: [ "openwrt/**" ]
-
-jobs:
-  build:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install deps
+# جایگزین steps از "Find and download SDK" به بعد:
+      - name: Clone OpenWrt buildroot
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk flex bison libssl-dev wget unzip python3 rsync file ccache curl
+          git clone --branch openwrt-23.05 --depth=1 https://github.com/openwrt/openwrt.git buildroot
           
-      - name: Find and download OpenWrt SDK
-        id: sdk
+      - name: Copy package
         run: |
-          set -euo pipefail
-          BASE="https://downloads.openwrt.org/releases/23.05.0/targets/mediatek/filogic"
-          echo "Fetching SDK index from $BASE/"
+          cp -r ${{ github.workspace }}/openwrt buildroot/package/pkt-frag
           
-          FILE=$(curl -sL "$BASE/" | grep -oE 'openwrt-sdk-[^"]*mediatek-filogic[^"]*\.tar\.(xz|gz)' | head -1)
-          
-          if [ -z "$FILE" ]; then
-            echo "❌ No SDK file found. Directory listing:"
-            curl -sL "$BASE/" | grep -oE 'href="[^"]*"' | sed 's/href="//;s/"//'
-            exit 1
-          fi
-          
-          echo "✅ Found SDK: $FILE"
-          wget -q --show-progress "$BASE/$FILE"
-          tar -xf "$FILE"
-          
-          SDK_DIR=$(find . -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -1)
-          if [ -z "$SDK_DIR" ]; then
-            echo "❌ SDK directory not found after extraction"
-            ls -la
-            exit 1
-          fi
-          
-          SDK_DIR=$(realpath "$SDK_DIR")
-          echo "SDK_DIR=$SDK_DIR" >> $GITHUB_OUTPUT
-          echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
-          
-      - name: Prepare package directory
+      - name: Configure buildroot
         run: |
-          PKG_DIR="${{ steps.sdk.outputs.SDK_DIR }}/package/pkt-frag"
-          mkdir -p "$PKG_DIR"
-          cp -r ${{ github.workspace }}/openwrt/* "$PKG_DIR/"
-          echo "Package directory contents:"
-          ls -la "$PKG_DIR"
-          
-      - name: Update feeds
-        run: |
-          cd ${{ steps.sdk.outputs.SDK_DIR }}
+          cd buildroot
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          
-      - name: Prepare kernel build directory (fix missing headers)
-        run: |
-          cd ${{ steps.sdk.outputs.SDK_DIR }}
-          # Prepare kernel headers and scripts
-          make target/linux/prepare V=s -j$(nproc) || true
-          # Also try to build kernel modules infrastructure
-          make target/linux/compile V=s -j$(nproc) || true
-          
-      - name: Configure packages
-        run: |
-          cd ${{ steps.sdk.outputs.SDK_DIR }}
           cat >> .config << 'EOF'
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
           CONFIG_PACKAGE_kmod-pkt-frag=m
           CONFIG_PACKAGE_pkt-frag-daemon=m
           CONFIG_PACKAGE_luci-app-pkt-frag=m
-          CONFIG_DEVEL=y
-          CONFIG_CCACHE=y
           EOF
           make defconfig
           
-      - name: Compile kernel module
+      - name: Build
         run: |
-          cd ${{ steps.sdk.outputs.SDK_DIR }}
-          # Use kernel build dir that was prepared
-          make package/pkt-frag/compile V=s -j$(nproc)
+          cd buildroot
+          make -j$(nproc)
           
-      - name: Compile LuCI app
-        run: |
-          cd ${{ steps.sdk.outputs.SDK_DIR }}
-          make package/luci-app-pkt-frag/compile V=s -j$(nproc)
-          
-      - name: Verify artifacts
-        run: |
-          find ${{ steps.sdk.outputs.SDK_DIR }}/bin -name "*.ipk" -type f | head -20
-          
-      - name: Upload IPK artifacts
+      - name: Upload IPKs
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-pkt-frag-ipks-arm64
           path: |
-            ${{ steps.sdk.outputs.SDK_DIR }}/bin/packages/aarch64_generic/base/kmod-pkt-frag*.ipk
-            ${{ steps.sdk.outputs.SDK_DIR }}/bin/packages/aarch64_generic/base/pkt-frag-daemon*.ipk
-            ${{ steps.sdk.outputs.SDK_DIR }}/bin/packages/aarch64_generic/luci/luci-app-pkt-frag*.ipk
+            buildroot/bin/packages/aarch64_generic/base/kmod-pkt-frag*.ipk
+            buildroot/bin/packages/aarch64_generic/base/pkt-frag-daemon*.ipk
+            buildroot/bin/packages/aarch64_generic/luci/luci-app-pkt-frag*.ipk
