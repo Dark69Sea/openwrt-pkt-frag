@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: [ "openwrt/pkt-frag/**" ]
+    paths: [ "openwrt/**" ]
 
 jobs:
   build:
@@ -48,19 +48,19 @@ jobs:
             exit 1
           fi
           
-          # Convert to absolute path
           SDK_DIR=$(realpath "$SDK_DIR")
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_OUTPUT
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
           
-      - name: Copy package to SDK
+      - name: Prepare package directory
         run: |
-          # Use absolute path for source
-          SRC="${{ github.workspace }}/openwrt/pkt-frag"
-          DST="${{ steps.sdk.outputs.SDK_DIR }}/package/pkt-frag"
-          echo "Copying $SRC -> $DST"
-          ls -la "$SRC"
-          cp -r "$SRC" "$DST"
+          # Create package directory and copy our package files
+          PKG_DIR="${{ steps.sdk.outputs.SDK_DIR }}/package/pkt-frag"
+          mkdir -p "$PKG_DIR"
+          # Copy all files from repo's openwrt/ to package/pkt-frag/
+          cp -r ${{ github.workspace }}/openwrt/* "$PKG_DIR/"
+          echo "Package directory contents:"
+          ls -la "$PKG_DIR"
           
       - name: Update feeds
         run: |
